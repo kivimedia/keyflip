@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWindowsForms>true</UseWindowsForms>
+    <!-- UseWPF brings in UIAutomationClient / UIAutomationTypes (System.Windows.Automation). -->
+    <UseWPF>true</UseWPF>
+    <AssemblyName>KeyFlip</AssemblyName>
+    <RootNamespace>KeyFlip</RootNamespace>
+    <Version>1.1.0</Version>
+    <!-- Physical pixels everywhere, so mouse-hook points and screen captures line up on scaled displays. -->
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Anthropic" Version="13.3.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="KeyFlip.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="dict\*.txt" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

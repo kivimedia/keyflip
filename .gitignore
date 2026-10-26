@@ -1,0 +1,8 @@
+bin/
+obj/
+dist/
+*.user
+.vs/
+# Real screenshots (private content) for the clicked-line test: local fixtures only.
+tests/KeyFlip.Tests/shots/
+plans/
