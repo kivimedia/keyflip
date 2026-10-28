@@ -10,7 +10,7 @@
     <UseWPF>true</UseWPF>
     <AssemblyName>KeyFlip</AssemblyName>
     <RootNamespace>KeyFlip</RootNamespace>
-    <Version>1.1.0</Version>
+    <Version>1.1.1</Version>
     <!-- Physical pixels everywhere, so mouse-hook points and screen captures line up on scaled displays. -->
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
   </PropertyGroup>

@@ -34,6 +34,7 @@ public sealed class TrayApp : ApplicationContext
         _fixer = new KeyboardFixer(_store, _decider, _watcher, words, _ui);
         _lines = new LineReader();
         _lines.Clicked += _decider.OnClick;
+        _lines.Clicked += _fixer.OnClick;
 
         _tray = new NotifyIcon { Visible = true, ContextMenuStrip = new ContextMenuStrip() };
         _tray.ContextMenuStrip.Opening += (_, _) => BuildMenu();

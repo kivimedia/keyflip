@@ -33,6 +33,10 @@ thin strip of the screen around the click and asks Claude Haiku which language t
 **While you type**, when a word ends it checks it against offline English and Hebrew word lists. If
 the word is gibberish on the current layout but a real word on the other one, it retypes it and
 switches. Press Backspace right after a fix to undo it; that word is then never fixed again.
+It only judges whole words it saw from the start (not the tail you retype after Backspace, a click or
+an arrow key), and while you are typing English it flips a word to Hebrew only when the keys cannot be
+English: three or more letters, a common Hebrew word, and not one typo away from an English word. It
+never switches the layout while your fingers are still on the keys in that window.
 
 The tray icon shows **HE** or **EN**. Left-click pauses. Right-click shows today's and this month's
 cost, toggles the word fixer and "start with Windows", and opens the log.

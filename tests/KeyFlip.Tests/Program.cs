@@ -116,7 +116,114 @@ Check(new ModelAnswer(Lang.En, 0.67, "english", 0, 0, OppositeProb: 0.01).Accept
 Check(!new ModelAnswer(Lang.En, 0.60, "english", 0, 0, OppositeProb: 0.35).Accept(0.70), "english 0.60 vs hebrew 0.35 is not");
 Check(!new ModelAnswer(null, 0.90, "unclear", 0, 0, OppositeProb: 0.0).Accept(0.70), "unclear is never accepted");
 
-// 7. Optional live probe of Jev and Haiku.
+// 7. Bug 28-Oct: typing a long English message in the VS Code chat, the fixer turned "eue", "sh", "th" and "nto"
+//    into Hebrew (קוק, די, אי, מאם) and switched the layout mid-sentence; each was undone or switched back by
+//    hand within 3 s. Every focus decision that morning was EN: the word fixer did it.
+//    Typing is replayed key by key into the same WordTracker the keyboard hook uses.
+//    In the scripts: '\b' = Backspace, '|' = a click, '^' = the app announcing the field again, '\t' = Tab.
+var clock = new DateTime(2026, 10, 28, 9, 36, 0);
+var vscode = (IntPtr)0x1001;
+List<WordTracker.Ended> Type(WordTracker t, TypingActivity act, string keys, Lang current = Lang.En)
+{
+    var ended = new List<WordTracker.Ended>();
+    var other = Layouts.OtherOf(current);
+    foreach (var ch in keys)
+    {
+        clock = clock.AddMilliseconds(120);
+        if (ch == '|') { t.Click(clock); continue; }
+        if (ch == '^') { t.NewField(); continue; }
+        act.Key(vscode, clock, movesFocus: ch is '\t' or '\n');
+        if (ch == '\b') { t.Backspace(); continue; }
+        var cur = ch.ToString();
+        var oth = Layouts.Transliterate(cur, Layouts.Hkl(current), Layouts.Hkl(other));
+        if (WordTracker.IsWordKey(ch, oth.Length == 1 ? oth[0] : '\0', current)) { t.Letter(cur, oth, current); continue; }
+        if (t.End(cur, current, vscode, clock, null) is { } e) ended.Add(e);
+    }
+    return ended;
+}
+(WordTracker t, TypingActivity a) Fresh() { var a = new TypingActivity(); return (new WordTracker(words, a), a); }
+string Result(List<WordTracker.Ended> ended) => string.Join(" ", ended.Select(e => e.Fixed ?? e.Typed));
+
+// 7a. The logged tokens, typed after real English words from that very message: never flipped mid-English.
+const string messageWords = "if she has access we need to understand her flow ";
+foreach (var (token, flippedTo) in new[] { ("eue", "קוק"), ("sh", "די"), ("th", "אי"), ("nto", "מאם") })
+{
+    var (t, a) = Fresh();
+    var last = Type(t, a, messageWords + token + " ").Last();
+    Check(last.Typed == token && last.Fixed == null && last.Blocked == "typing English",
+          $"typing English, \"{token}\" is not flipped to \"{flippedTo}\" (28-Oct VS Code log){(last.Fixed == null ? "" : $": became \"{last.Fixed}\"")}");
+}
+
+// 7b. A word whose start the fixer never saw is not a word: the tail retyped after Backspace past the
+//     previous word ("wiht" -> "wi" + "th"), after a click into existing text, after the app announces the
+//     field again mid-word, or glued to a digit ("28th").
+foreach (var (script, what) in new[]
+{
+    ("wiht \b\b\bth ", "tail retyped after Backspace into the previous word (wi|th)"),
+    ("englihs \b\b\bsh ", "tail retyped after Backspace into the previous word (engli|sh)"),
+    ("|th ", "letters typed after a click into existing text"),
+    ("wi^th ", "a word split by the app announcing the field again"),
+    ("28th ", "letters glued to a digit"),
+})
+{
+    var (t, a) = Fresh();
+    var ended = Type(t, a, script);
+    var th = ended.Last();
+    Check(th.Fixed == null && th.Blocked == "word start not seen",
+          $"not a whole word, not fixed: {what}{(th.Fixed == null ? "" : $": \"{th.Typed}\" became \"{th.Fixed}\"")}");
+}
+
+// 7c. Real wrong-layout typing is still fixed.
+{
+    var (t, a) = Fresh();
+    var got = Result(Type(t, a, "akuo nv akunl vhuo "));
+    Check(got == "שלום מה שלומך היום", $"Hebrew typed on English in a new field is fixed, word by word: \"{got}\"");
+    (t, a) = Fresh();
+    got = Result(Type(t, a, "akup\bo "));
+    Check(got == "שלום", $"Backspace inside the word keeps its start: \"{got}\"");
+    (t, a) = Fresh();
+    var last = Type(t, a, messageWords + "akuo ").Last();
+    Check(last.Fixed == "שלום", $"typing English, a clear Hebrew word on the English layout is still fixed: \"{last.Fixed ?? last.Typed}\"");
+    (t, a) = Fresh();
+    got = Result(Type(t, a, HeKeys("please send me the report today") + " ", Lang.He));
+    Check(got == "please send me the report today", $"English typed on Hebrew is fixed: \"{got}\"");
+}
+
+// 7d. Rates while typing English: typos of real English words must not flip; real Hebrew words mostly still do.
+{
+    var typos = new HashSet<string>();
+    foreach (var w in enTop.Where(w => w.Length >= 3).Take(3000))
+    {
+        for (int i = 0; i < w.Length; i++) typos.Add(w.Remove(i, 1));                                     // a dropped letter
+        for (int i = 0; i + 1 < w.Length; i++) typos.Add(w[..i] + w[i + 1] + w[i] + w[(i + 2)..]);         // two swapped
+    }
+    typos.RemoveWhere(x => x.Length < 2 || words.EnglishRank(x) != 0);
+    int typoOld = typos.Count(x => words.Fix(x, HeKeys(x), Lang.En) != null);
+    int typoNow = typos.Count(x => words.Fix(x, HeKeys(x), Lang.En, null, typingEnglish: true) != null);
+    int heMid = heTop.Count(w => words.Fix(EnKeys(w), w, Lang.En, null, typingEnglish: true) == w);
+    Console.WriteLine($"      typing English: {typos.Count} typos of common words, flipped to Hebrew {typoOld} before, {typoNow} now; " +
+                      $"Hebrew-on-English still caught {heMid}/{heTop.Count}");
+    Check(typoNow <= typos.Count / 1000, $"typing English, under 0.1% of English typos flip to Hebrew ({typoNow} of {typos.Count})");
+    Check(heMid >= heTop.Count * 0.4, $"typing English, at least 40% of real Hebrew words typed on English are still caught ({heMid})");
+}
+
+// 7e. A focus event while keys are still flowing in the same window is the app announcing the field again
+//     (VS Code flips between the chat box and its webview root while you type; 26-Oct it ping-ponged HE/EN).
+{
+    var a = new TypingActivity();
+    var t0 = new DateTime(2026, 10, 28, 9, 26, 16);
+    a.Key(vscode, t0, movesFocus: false);
+    Check(a.KeysFlowing(vscode, t0.AddMilliseconds(300)), "a focus event 0.3 s after a letter, same window = re-announce, no switch");
+    Check(!a.KeysFlowing(vscode, t0.AddSeconds(2)), "2 s after the last key = a real focus change");
+    Check(!a.KeysFlowing((IntPtr)0x2002, t0.AddMilliseconds(300)), "another window = a real focus change");
+    a.Key(vscode, t0, movesFocus: true);
+    Check(!a.KeysFlowing(vscode, t0.AddMilliseconds(300)), "right after Tab / Enter = a real focus change");
+    a.Key(vscode, t0, movesFocus: false);
+    a.Click(t0.AddMilliseconds(100));
+    Check(!a.KeysFlowing(vscode, t0.AddMilliseconds(300)), "after a click = a real focus change");
+}
+
+// 8. Optional live probe of Jev and Haiku.
 if (args.Contains("probe"))
 {
     var store = new Store();

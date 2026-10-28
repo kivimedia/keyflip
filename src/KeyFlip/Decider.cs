@@ -31,6 +31,9 @@ public sealed class Decider
     }
 
     public FieldContext? Current => _current;
+
+    /// <summary>What is being typed right now, fed by the keyboard hook.</summary>
+    public TypingActivity Activity { get; } = new();
     public bool JevAvailable => _jev.Available;
     public bool HaikuAvailable => _haiku.Available;
 
@@ -191,6 +194,9 @@ public sealed class Decider
         else if (_typedSinceFocus) result = "skipped: already typing";
         else if (_manualSinceFocus) result = "skipped: manual switch";
         else if (Layouts.ForegroundLang() == lang) result = "already";
+        // Keys still flowing in this window: the app re-announced the field being typed in (VS Code flips
+        // between its chat box and the webview root while you type). Never switch under the user's fingers.
+        else if (Activity.KeysFlowing(Native.GetForegroundWindow(), DateTime.Now)) result = "skipped: still typing";
         else
         {
             _watcher.ExpectSwitch(lang);

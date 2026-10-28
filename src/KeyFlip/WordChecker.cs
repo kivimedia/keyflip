@@ -42,6 +42,40 @@ public sealed class WordChecker
     /// <summary>Rank of an English word (1 = most common), or 0 if unknown.</summary>
     public int EnglishRank(string w) => _en.TryGetValue(w.ToLowerInvariant(), out var r) ? r : 0;
 
+    /// <summary>While typing English, only a Hebrew word at least this common is worth flipping to.</summary>
+    internal const int MidEnglishHebrewRank = 10000;
+
+    /// <summary>English words at least this common count as "one typo away" in <see cref="NearEnglish"/>.</summary>
+    internal const int TypoSourceRank = 10000;
+
+    /// <summary>
+    /// One typo (a dropped, extra, wrong or swapped letter) away from a common English word: "nto" (not),
+    /// "eue" (due), "wiht" (with). Fast typists make these all the time; they are not Hebrew.
+    /// </summary>
+    public bool NearEnglish(string w)
+    {
+        w = w.ToLowerInvariant();
+        bool Common(string c) => _en.TryGetValue(c, out var r) && r <= TypoSourceRank;
+        for (int i = 0; i < w.Length; i++)
+        {
+            if (Common(w.Remove(i, 1))) return true;
+            if (i + 1 < w.Length && Common(w[..i] + w[i + 1] + w[i] + w[(i + 2)..])) return true;
+            for (char c = 'a'; c <= 'z'; c++)
+                if (c != w[i] && Common(w[..i] + c + w[(i + 1)..])) return true;
+        }
+        for (int i = 0; i <= w.Length; i++)
+            for (char c = 'a'; c <= 'z'; c++)
+                if (Common(w.Insert(i, c.ToString()))) return true;
+        return false;
+    }
+
+    /// <summary>A real English word: any listed word of 3+ letters, or a common short one ("if", "we", "to").</summary>
+    public bool IsEnglishWord(string w)
+    {
+        int r = w.Length > 0 ? EnglishRank(w) : 0;
+        return r != 0 && (w.Length > 2 || r <= 2000);
+    }
+
     /// <summary>Rank of a Hebrew word, also trying with up to two prefix letters (ו ה ב ל מ ש כ) removed.</summary>
     public int HebrewRank(string w)
     {
@@ -80,7 +114,7 @@ public sealed class WordChecker
     /// layout (other), returns the corrected text if the word was clearly typed on the wrong
     /// layout, or null to leave it alone.
     /// </summary>
-    public string? Fix(string typed, string other, Lang current, ISet<string>? neverFlip = null)
+    public string? Fix(string typed, string other, Lang current, ISet<string>? neverFlip = null, bool typingEnglish = false)
     {
         if (typed.Length < 2 || typed.Length != other.Length) return null;
 
@@ -115,6 +149,9 @@ public sealed class WordChecker
             if (heRank == 0) return null;
             if (other.Length == 2 && heRank > 300) return null;
             if (other.Length == 3 && heRank > 20000) return null;
+            // While the user is typing English, a flip needs keys that only make sense as Hebrew (bug 28-Oct:
+            // "th", "sh", "eue", "nto" were tails and typos of English words, flipped to אי, די, קוק, מאם).
+            if (typingEnglish && (core.Length < 3 || heRank > MidEnglishHebrewRank || NearEnglish(core))) return null;
             return other;
         }
 

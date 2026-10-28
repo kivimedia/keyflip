@@ -14,14 +14,12 @@ public sealed class KeyboardFixer : IDisposable
     private readonly Store _store;
     private readonly Decider _decider;
     private readonly FocusWatcher _watcher;
-    private readonly WordChecker _words;
     private readonly Control _ui;
     private readonly LowLevelKeyboardProc _proc;
     private IntPtr _hook;
 
-    private readonly record struct Key(uint Vk, uint Scan, bool Shift, bool Caps);
-    private readonly List<Key> _word = new();
-    private Lang _wordLang;
+    private readonly WordTracker _word;
+    private readonly TypingActivity _activity;
     private int _wordSeq;
 
     private sealed record LastFix(string Typed, string Fixed, uint EndVk, string EndTextBefore, string EndTextAfter, Lang Before, DateTime At);
@@ -32,9 +30,18 @@ public sealed class KeyboardFixer : IDisposable
         _store = store;
         _decider = decider;
         _watcher = watcher;
-        _words = words;
         _ui = ui;
+        _activity = decider.Activity;
+        _word = new WordTracker(words, _activity);
         _proc = HookProc;
+    }
+
+    /// <summary>A left click (mouse hook, UI thread, same as the keyboard hook): the caret may have moved
+    /// into the middle of text, so the keys that follow are not known to start a word.</summary>
+    public void OnClick(System.Drawing.Point _)
+    {
+        _word.Click(DateTime.Now);
+        _lastFix = null;
     }
 
     public void Start() => _hook = SetWindowsHookEx(WH_KEYBOARD_LL, _proc, GetModuleHandle(null), 0);
@@ -64,7 +71,7 @@ public sealed class KeyboardFixer : IDisposable
 
     private void Reset()
     {
-        _word.Clear();
+        _word.CaretMoved();
         _lastFix = null;
     }
 
@@ -74,6 +81,11 @@ public sealed class KeyboardFixer : IDisposable
         bool isModifier = vk is 0x10 or 0x11 or 0x12 or 0xA0 or 0xA1 or 0xA2 or 0xA3 or 0xA4 or 0xA5 or 0x5B or 0x5C or 0x14;
         if (isModifier) return false;
         _decider.NoteKey();
+        bool shortcut = Down(0x11) || Down(0x12) || Down(0x5B) || Down(0x5C);
+        var window = GetForegroundWindow();
+        var now = DateTime.Now;
+        // Tab, Enter, Escape and shortcuts (Ctrl+L, Ctrl+K...) move the focus on purpose; other keys are typing.
+        _activity.Key(window, now, movesFocus: shortcut || vk is 0x09 or 0x0D or 0x1B);
 
         var ctx = _decider.Current;
         if (_store.Config.Paused || !_store.Config.FixerEnabled || !Layouts.Ready || ctx == null || ctx.IsPassword
@@ -84,10 +96,10 @@ public sealed class KeyboardFixer : IDisposable
         }
 
         // Shortcuts (Ctrl / Alt / Win + key) are never typing.
-        if (Down(0x11) || Down(0x12) || Down(0x5B) || Down(0x5C)) { Reset(); return false; }
+        if (shortcut) { Reset(); return false; }
 
         // A new field means a new word.
-        if (_watcher.Seq != _wordSeq) { _word.Clear(); _wordSeq = _watcher.Seq; }
+        if (_watcher.Seq != _wordSeq) { _word.NewField(); _wordSeq = _watcher.Seq; }
 
         if (vk == 0x08) // Backspace
         {
@@ -99,7 +111,7 @@ public sealed class KeyboardFixer : IDisposable
                 return true;
             }
             _lastFix = null;
-            if (_word.Count > 0) _word.RemoveAt(_word.Count - 1);
+            _word.Backspace();
             return false;
         }
 
@@ -114,40 +126,32 @@ public sealed class KeyboardFixer : IDisposable
         if (curText.Length != 1) { Reset(); return false; } // arrows, F-keys, Delete, Escape...
         _lastFix = null;
 
-        char cc = curText[0], oc = othText.Length == 1 ? othText[0] : '\0';
-        bool wordKey = current == Lang.En
-            ? char.IsLetter(cc) || WordChecker.IsHebrewLetter(oc)
-            : WordChecker.IsHebrewLetter(cc) || WordChecker.IsLatinLetter(oc);
-
-        if (wordKey)
+        char oc = othText.Length == 1 ? othText[0] : '\0';
+        if (WordTracker.IsWordKey(curText[0], oc, current))
         {
-            if (_word.Count == 0) _wordLang = current;
-            if (_wordLang != current) _word.Clear();
-            _wordLang = current;
-            _word.Add(new Key(vk, k.scanCode, shift, caps));
+            _word.Letter(curText, othText, current);
             return false;
         }
 
         // Any other character ends the word.
-        if (_word.Count == 0) return false;
-        var keys = _word.ToArray();
-        _word.Clear();
-        var typed = string.Concat(keys.Select(x => Layouts.ToText(x.Vk, x.Scan, x.Shift, x.Caps, Layouts.Hkl(current))));
-        var meant = string.Concat(keys.Select(x => Layouts.ToText(x.Vk, x.Scan, x.Shift, x.Caps, Layouts.Hkl(other))));
-
-        var fixedWord = _words.Fix(typed, meant, current, _store.NeverFlip);
-        if (fixedWord == null)
+        var ended = _word.End(curText, current, window, now, _store.NeverFlip);
+        if (ended is not { } e) return false;
+        if (e.Blocked != null)
         {
-            bool real = current == Lang.En ? _words.EnglishRank(typed.Trim(',', '.', ';', '\'')) != 0
-                                           : !WordChecker.LooksBrokenHebrew(typed) && _words.HebrewRank(typed) != 0;
-            if (real && typed.Length >= 3) _decider.NoteTypedWord(current);
+            // What the old rule would have flipped, and why it did not: the live log proves the guards.
+            string app = ctx.App, site = ctx.Site;
+            _ui.BeginInvoke(() => Log.Write(new { kind = "nofix", from = e.Typed, to = e.Meant, reason = e.Blocked, app, site }));
+        }
+        if (e.Fixed == null)
+        {
+            if (e.RealWord) _decider.NoteTypedWord(current);
             return false;
         }
 
         // Swallow the ending key; the fix retypes it after the corrected word.
         var endAfter = vk is 0x20 or 0x0D or 0x09 ? "" : Layouts.ToText(vk, k.scanCode, shift, caps, Layouts.Hkl(other));
-        var fix2 = new LastFix(typed, fixedWord, vk, curText, endAfter, current, DateTime.Now);
-        _ui.BeginInvoke(() => Apply(fix2, keys.Length));
+        var fix2 = new LastFix(e.Typed, e.Fixed, vk, curText, endAfter, current, DateTime.Now);
+        _ui.BeginInvoke(() => Apply(fix2, e.Keys));
         return true;
     }
 
