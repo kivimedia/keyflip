@@ -11,6 +11,24 @@ public sealed class Config
     public bool Paused { get; set; }
     public List<string> ExcludedApps { get; set; } = new();
     public List<string> FixerExcludedApps { get; set; } = new() { "WindowsTerminal", "cmd", "powershell", "pwsh", "conhost", "mintty" };
+    /// <summary>Sites KeyFlip never touches: no layout choice, no word fixing. A typing-lesson site
+    /// drills letter runs ("דדד ששש") that read as wrong-layout words, so every fix there is wrong.</summary>
+    public List<string> ExcludedSites { get; set; } = new() { "agilefingers.com" };
+
+    /// <summary>True for an excluded domain and every subdomain of it.</summary>
+    public bool SiteExcluded(string? site)
+    {
+        if (string.IsNullOrWhiteSpace(site)) return false;
+        var s = site.Trim().TrimEnd('.').ToLowerInvariant();
+        if (s.StartsWith("www.")) s = s[4..];
+        foreach (var raw in ExcludedSites)
+        {
+            var d = (raw ?? "").Trim().ToLowerInvariant();
+            if (d.Length == 0) continue;
+            if (s == d || s.EndsWith("." + d)) return true;
+        }
+        return false;
+    }
 }
 
 public sealed class Learned

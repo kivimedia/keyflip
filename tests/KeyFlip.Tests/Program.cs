@@ -83,6 +83,14 @@ if (heFalse > 0) Console.WriteLine("      e.g. " + string.Join(", ", heTop.Where
 
 // 5. Text already in the field.
 Check(Decider.ScriptOf("שלום, מה נשמע?") == Lang.He, "existing Hebrew text -> HE");
+
+// Excluded sites: a typing-lesson site drills "דדד ששש", which reads as wrong-layout English.
+{
+    var cfg = new Config();
+    Check(cfg.SiteExcluded("agilefingers.com"), "agilefingers.com is excluded by default");
+    Check(cfg.SiteExcluded("www.agilefingers.com") && cfg.SiteExcluded("App.AgileFingers.com"), "its subdomains are excluded too");
+    Check(!cfg.SiteExcluded("notagilefingers.com") && !cfg.SiteExcluded("docs.google.com") && !cfg.SiteExcluded(""), "other sites and non-browser apps are not excluded");
+}
 Check(Decider.ScriptOf("Hi Dana, thanks") == Lang.En, "existing English text -> EN");
 Check(Decider.ScriptOf("ok") == null, "too little text -> no decision");
 

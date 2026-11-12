@@ -89,7 +89,8 @@ public sealed class KeyboardFixer : IDisposable
 
         var ctx = _decider.Current;
         if (_store.Config.Paused || !_store.Config.FixerEnabled || !Layouts.Ready || ctx == null || ctx.IsPassword
-            || _store.Config.FixerExcludedApps.Contains(ctx.App, StringComparer.OrdinalIgnoreCase))
+            || _store.Config.FixerExcludedApps.Contains(ctx.App, StringComparer.OrdinalIgnoreCase)
+            || _store.Config.SiteExcluded(ctx.Site))
         {
             Reset();
             return false;

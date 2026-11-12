@@ -124,6 +124,7 @@ public sealed class Decider
 
         if (_store.Config.Paused || !ctx.IsText || ctx.IsPassword || !Layouts.Ready) return;
         if (_store.Config.ExcludedApps.Contains(ctx.App, StringComparer.OrdinalIgnoreCase)) return;
+        if (_store.Config.SiteExcluded(ctx.Site)) return;
         _ = Task.Run(() => DecideAsync(ctx, seq));
     }
 
