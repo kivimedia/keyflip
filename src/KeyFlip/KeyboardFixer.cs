@@ -88,9 +88,8 @@ public sealed class KeyboardFixer : IDisposable
         _activity.Key(window, now, movesFocus: shortcut || vk is 0x09 or 0x0D or 0x1B);
 
         var ctx = _decider.Current;
-        if (_store.Config.Paused || !_store.Config.FixerEnabled || !Layouts.Ready || ctx == null || ctx.IsPassword
-            || _store.Config.FixerExcludedApps.Contains(ctx.App, StringComparer.OrdinalIgnoreCase)
-            || _store.Config.SiteExcluded(ctx.Site))
+        // Paused, fixer off, password, excluded app or site, or the browser address bar (English only).
+        if (!Layouts.Ready || ctx == null || _store.Config.FixerBlock(ctx) != null)
         {
             Reset();
             return false;

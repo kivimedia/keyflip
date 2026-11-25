@@ -15,6 +15,18 @@ public sealed class Config
     /// drills letter runs ("דדד ששש") that read as wrong-layout words, so every fix there is wrong.</summary>
     public List<string> ExcludedSites { get; set; } = new() { "agilefingers.com" };
 
+    /// <summary>Why the word fixer must stay out of this field, or null when it may fix words there.</summary>
+    public string? FixerBlock(FieldContext ctx)
+    {
+        if (Paused) return "paused";
+        if (!FixerEnabled) return "fixer off";
+        if (ctx.IsPassword) return "password";
+        if (FixerExcludedApps.Contains(ctx.App, StringComparer.OrdinalIgnoreCase)) return "excluded app";
+        if (SiteExcluded(ctx.Site)) return "excluded site";
+        if (ctx.IsAddressBar) return "address bar";
+        return null;
+    }
+
     /// <summary>True for an excluded domain and every subdomain of it.</summary>
     public bool SiteExcluded(string? site)
     {

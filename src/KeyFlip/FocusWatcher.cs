@@ -74,6 +74,15 @@ public sealed class FieldContext
 
     public bool HasRealText => (Label + Help + Text + Site).Count(char.IsLetter) >= 3;
 
+    /// <summary>The browser's own address bar: "Address and search bar" in Chrome, Edge and Brave, urlbar-input in
+    /// Firefox. Addresses, site names and chrome:// pages are English: 25-Nov the word fixer turned "auth"
+    /// (authorize.net) into "שואי" there and Chrome searched Google for it (15 such fixes since 26-Oct, all wrong).</summary>
+    public bool IsAddressBar =>
+        Label.Equals("Address and search bar", StringComparison.OrdinalIgnoreCase) || AutomationId == "urlbar-input";
+
+    /// <summary>A field whose language is fixed, whatever was learned or asked: the address bar is English.</summary>
+    public Lang? FixedLang => IsAddressBar ? Lang.En : null;
+
     internal static string Cut(string s, int n) => s.Length > n ? s[..n] : s;
 }
 

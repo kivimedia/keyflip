@@ -231,6 +231,33 @@ foreach (var (script, what) in new[]
     Check(!a.KeysFlowing(vscode, t0.AddMilliseconds(300)), "after a click = a real focus change");
 }
 
+// 9. Bug 25-Nov: the browser address bar is English only. Typing "auth" (for authorize.net) there, the fixer
+//    rewrote it to "שואי" and Chrome searched Google for it; "chr" became "ביר", "cl" became "בך", "fath" became
+//    "כשאי". 15 of the 82 fixes ever made were in the address bar, and every one was wrong.
+{
+    var cfg = new Config();
+    FieldContext Bar(string app, string label = "Address and search bar", string id = "") => new()
+        { App = app, Site = "", Title = "New Tab - Google Chrome", Kind = "Edit", Label = label, AutomationId = id, IsText = true };
+    foreach (var app in new[] { "chrome", "msedge", "brave" })
+    {
+        var bar = Bar(app);
+        Check(bar.IsAddressBar && cfg.FixerBlock(bar) == "address bar",
+              $"{app} address bar: the word fixer stays out (got {cfg.FixerBlock(bar) ?? "null"})");
+        Check(bar.FixedLang == Lang.En, $"{app} address bar: focusing it picks English");
+    }
+    var firefox = Bar("firefox", "Search with Google or enter address", "urlbar-input");
+    Check(firefox.IsAddressBar && cfg.FixerBlock(firefox) == "address bar", "firefox address bar: the word fixer stays out");
+
+    var googleBox = new FieldContext { App = "chrome", Site = "google.com", Title = "Google - Google Chrome", Kind = "ComboBox", Label = "Search", IsText = true };
+    Check(!googleBox.IsAddressBar && cfg.FixerBlock(googleBox) == null && googleBox.FixedLang == null,
+          "the search box ON google.com is not the address bar: Hebrew typed there on English is still fixed");
+    var chat = new FieldContext { App = "chrome", Site = "web.whatsapp.com", Title = "WhatsApp - Google Chrome", Kind = "Edit", Label = "Type a message to דני", IsText = true };
+    Check(cfg.FixerBlock(chat) == null && chat.FixedLang == null, "a WhatsApp chat box is still fixed and still decided by the ladder");
+    Check(cfg.FixerBlock(new FieldContext { App = "chrome", Label = "Password", IsPassword = true, IsText = true }) == "password", "password field: never fixed (unchanged)");
+    Check(cfg.FixerBlock(new FieldContext { App = "WindowsTerminal", Kind = "Edit", IsText = true }) == "excluded app", "terminal: never fixed (unchanged)");
+    Check(cfg.FixerBlock(new FieldContext { App = "chrome", Site = "agilefingers.com", Kind = "Edit", IsText = true }) == "excluded site", "typing-lesson site: never fixed (unchanged)");
+}
+
 // 8. Optional live probe of Jev and Haiku.
 if (args.Contains("probe"))
 {

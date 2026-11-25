@@ -133,6 +133,9 @@ public sealed class Decider
         var started = DateTime.Now;
         _store.Count(d => d.Focus++);
 
+        // 0. A field with a fixed language (the browser address bar is English), whatever was learned there.
+        if (ctx.FixedLang is { } fixedLang) { Apply(ctx, seq, fixedLang, "address bar", started); return; }
+
         // 1. Learned for this exact field (manual switches, typing, or an earlier model answer).
         var learned = _store.GetField(ctx.FieldKey);
         if (learned != null) { Apply(ctx, seq, learned.Lang, "learned:" + learned.Source, started); return; }

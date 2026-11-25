@@ -38,6 +38,11 @@ an arrow key), and while you are typing English it flips a word to Hebrew only w
 English: three or more letters, a common Hebrew word, and not one typo away from an English word. It
 never switches the layout while your fingers are still on the keys in that window.
 
+**The browser address bar is English only** (Chrome, Edge, Brave, Firefox): focusing it picks English,
+and the word fixer never touches it. Addresses and site names are not words: "auth" for a site you
+are about to open is valid Hebrew on the other layout ("שואי"), and the fixer used to send it to a search.
+The search box on a web page is not the address bar and works as before.
+
 The tray icon shows **HE** or **EN**. Left-click pauses. Right-click shows today's and this month's
 cost, toggles the word fixer and "start with Windows", and opens the log.
 
