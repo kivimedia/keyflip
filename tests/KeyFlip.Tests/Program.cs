@@ -258,6 +258,38 @@ foreach (var (script, what) in new[]
     Check(cfg.FixerBlock(new FieldContext { App = "chrome", Site = "agilefingers.com", Kind = "Edit", IsText = true }) == "excluded site", "typing-lesson site: never fixed (unchanged)");
 }
 
+// 10. Bug 26-Nov: clicking Chrome's address bar froze Chrome for minutes. The site lookup searched the WHOLE
+//     window for the address bar (FindFirst over every descendant, one cross-process call per node that
+//     Chrome's UI thread answers, and again after any error); with 420 saved tab groups that walk ran for
+//     minutes. Now it reads the focused element and its parents only. IUiNode has no children, so these
+//     fake trees can only be walked upward.
+{
+    FakeNode Chain(FakeNode top, int depth) { var n = top; for (int i = 0; i < depth; i++) n = new FakeNode("group", parent: n); return n; }
+    var window = new FakeNode("Google Chrome");
+
+    var bar = new FakeNode(SiteFinder.AddressBarName, edit: true, value: "snov.io/pricing", parent: Chain(window, 6));
+    Check(SiteFinder.UrlFor(bar, out var s0) == "snov.io/pricing" && s0 == 0, "address bar focused: its own text, no walk at all");
+    Check(SiteFinder.HostOf("snov.io/pricing") == "snov.io" && SiteFinder.HostOf("https://www.snov.io/x") == "snov.io",
+          "host from a typed address and from a full URL (www. dropped, unchanged)");
+    Check(SiteFinder.HostOf(null) == "" && SiteFinder.HostOf("") == "", "no URL = no site");
+
+    var page = new FakeNode("WhatsApp", document: true, value: "https://web.whatsapp.com/", parent: Chain(window, 8));
+    var input = new FakeNode("Type a message", edit: true, parent: Chain(page, 25));
+    Check(SiteFinder.HostOf(SiteFinder.UrlFor(input, out var s1)) == "web.whatsapp.com",
+          $"a field 25 levels deep in a page: the page's site, read walking up ({s1} parents)");
+
+    var frame = new FakeNode("ad", document: true, value: "https://ads.example.net/frame", parent: Chain(page, 3));
+    var inFrame = new FakeNode("Email", edit: true, parent: Chain(frame, 4));
+    Check(SiteFinder.HostOf(SiteFinder.UrlFor(inFrame, out _)) == "web.whatsapp.com", "a field inside an iframe: the tab's site, not the iframe's");
+
+    var close = new FakeNode("Close", parent: Chain(window, 5));
+    Check(SiteFinder.UrlFor(close, out _) == null, "browser UI with no page above it: no site (and nothing searched)");
+
+    var loop = new FakeNode("broken provider");
+    loop.Parent = loop;
+    Check(SiteFinder.UrlFor(loop, out var s2) == null && s2 == SiteFinder.MaxParents + 1, $"a provider whose parent is itself: the walk stops at the bound ({s2})");
+}
+
 // 8. Optional live probe of Jev and Haiku.
 if (args.Contains("probe"))
 {
@@ -307,3 +339,18 @@ if (args.Contains("probe"))
 
 Console.WriteLine(failures == 0 ? "ALL PASSED" : $"{failures} FAILED");
 return failures == 0 ? 0 : 1;
+
+/// <summary>A UI Automation element stand-in for the site lookup tests (block 10).</summary>
+sealed class FakeNode : IUiNode
+{
+    public FakeNode(string name, bool edit = false, bool document = false, string? value = null, FakeNode? parent = null)
+    {
+        Name = name; IsEdit = edit; IsDocument = document; Value = value; Parent = parent;
+    }
+    public string Name { get; }
+    public bool IsEdit { get; }
+    public bool IsDocument { get; }
+    public string? Value { get; }
+    public FakeNode? Parent { get; set; }
+    IUiNode? IUiNode.Parent => Parent;
+}

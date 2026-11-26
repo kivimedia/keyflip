@@ -99,7 +99,7 @@ public sealed class FocusWatcher
     public event Action<Lang>? ManualSwitch;
 
     private readonly Dictionary<uint, string> _procNames = new();
-    private readonly Dictionary<IntPtr, AutomationElement?> _addressBars = new();
+    private readonly Dictionary<IntPtr, DateTime> _slowUntil = new();
     private Thread? _thread;
     private volatile bool _stop;
 
@@ -201,7 +201,7 @@ public sealed class FocusWatcher
         return new FieldContext
         {
             App = app,
-            Site = Browsers.Contains(app) ? SiteOf(fg) : "",
+            Site = Browsers.Contains(app) ? SiteOf(el, fg, app) : "",
             Title = title.ToString(),
             Kind = type.ProgrammaticName.Replace("ControlType.", ""),
             Label = c.Name ?? "",
@@ -220,28 +220,52 @@ public sealed class FocusWatcher
         return _procNames[pid] = n;
     }
 
-    /// <summary>Host name from the browser address bar, found once per window and cached.</summary>
-    private string SiteOf(IntPtr fg)
+    /// <summary>A site read slower than this leaves that window alone for SlowBackoff.</summary>
+    private const int SlowMs = 1500;
+    private static readonly TimeSpan SlowBackoff = TimeSpan.FromMinutes(2);
+
+    /// <summary>
+    /// Host name of the page the focused element is in, reading only the element and its ancestors
+    /// (SiteFinder). Until 1.1.3 this searched the whole browser window for the address bar
+    /// (FindFirst over TreeScope.Descendants) on every focus in a window not yet cached, and again after
+    /// any error. 26-Nov-2026 that walk kept Chrome Not Responding for minutes each time the user clicked
+    /// the URL field (420 saved tab groups made the tree huge). Never search downward here.
+    /// </summary>
+    private string SiteOf(AutomationElement el, IntPtr fg, string app)
     {
-        try
+        if (_slowUntil.TryGetValue(fg, out var until) && DateTime.Now < until) return "";
+        var sw = Stopwatch.StartNew();
+        int steps = 0;
+        string site = "";
+        try { site = SiteFinder.HostOf(SiteFinder.UrlFor(new UiaNode(el), out steps)); }
+        catch { }
+        long ms = sw.ElapsedMilliseconds;
+        if (ms >= SlowMs)
         {
-            if (!_addressBars.TryGetValue(fg, out var bar))
-            {
-                var root = AutomationElement.FromHandle(fg);
-                bar = root.FindFirst(TreeScope.Descendants, new AndCondition(
-                    new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Edit),
-                    new PropertyCondition(AutomationElement.NameProperty, "Address and search bar")));
-                _addressBars[fg] = bar;
-            }
-            if (bar == null) return "";
-            var url = ((ValuePattern)bar.GetCurrentPattern(ValuePattern.Pattern)).Current.Value ?? "";
-            if (!url.Contains("://")) url = "https://" + url;
-            return Uri.TryCreate(url, UriKind.Absolute, out var u) ? u.Host.Replace("www.", "") : "";
+            _slowUntil[fg] = DateTime.Now + SlowBackoff;
+            Log.Write(new { kind = "slow_read", app, steps, ms, backoff_s = (int)SlowBackoff.TotalSeconds });
         }
-        catch
+        return site;
+    }
+
+    /// <summary>IUiNode over a live UI Automation element: one call per property, parents only.</summary>
+    private sealed class UiaNode : IUiNode
+    {
+        private readonly AutomationElement _el;
+        private ControlType? _type;
+        public UiaNode(AutomationElement el) => _el = el;
+        private ControlType Type => _type ??= _el.Current.ControlType;
+        public string Name => _el.Current.Name ?? "";
+        public bool IsEdit => Type == ControlType.Edit;
+        public bool IsDocument => Type == ControlType.Document;
+        public string? Value => _el.TryGetCurrentPattern(ValuePattern.Pattern, out var p) ? ((ValuePattern)p).Current.Value : null;
+        public IUiNode? Parent
         {
-            _addressBars.Remove(fg);
-            return "";
+            get
+            {
+                var p = TreeWalker.ControlViewWalker.GetParent(_el);
+                return p == null ? null : new UiaNode(p);
+            }
         }
     }
 }
